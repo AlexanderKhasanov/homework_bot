@@ -9,7 +9,7 @@ from logging import StreamHandler
 from http import HTTPStatus
 from telegram import Bot
 
-from exceptions import SystemVarNameError
+from exceptions import SystemVarNameError, NotAvailableAPI
 
 
 load_dotenv()
@@ -23,7 +23,7 @@ ENV_VARS = {
 }
 
 RETRY_PERIOD = 600
-ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
+ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/rge'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
 HOMEWORK_VERDICTS = {
@@ -48,7 +48,7 @@ logger.addHandler(handler)
 
 
 def check_tokens():
-    '''Проверка доступности переменных  окружения'''
+    """Проверка доступности переменных  окружения."""
     for name_var, var in ENV_VARS.items():
         if not var:
             raise SystemVarNameError(
@@ -57,29 +57,33 @@ def check_tokens():
 
 
 def send_message(bot, message):
-    """Отправка сообщения в Telegram чат"""
+    """Отправка сообщения в Telegram чат."""
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     logger.debug(f'Бот отправил сообщение "{message}"')
 
 
 def get_api_answer(timestamp):
-    """Отправка запроса к ендпоинту API-сервиса"""
-    response = requests.get(
-        ENDPOINT,
-        headers=HEADERS,
-        params={'from_date': timestamp}
-    )
-    if (response.status_code == HTTPStatus.OK):
-        return response.json()
-    else:
-        raise requests.RequestException(
-            (f'Эндпоинт {ENDPOINT} недоступен. '
-             f'Код ответа API: {response.status_code}')
+    """Отправка запроса к ендпоинту API-сервиса."""
+    try:
+        response = requests.get(
+            ENDPOINT,
+            headers=HEADERS,
+            params={'from_date': timestamp}
         )
+    except requests.RequestException as error:
+        raise NotAvailableAPI(f'Ошибка при запросе к API: {error}')
+    except Exception as error:
+        raise Exception(f'Непредвиденная ошибка: {error}')
+    if (response.status_code != HTTPStatus.OK):
+        raise NotAvailableAPI(
+            f'Эндпоинт {ENDPOINT} недоступен. '
+            f'Код ответа API: {response.status_code}'
+        )
+    return response.json()
 
 
 def check_response(response):
-    """Проверка ответа API сервиса на соответствие документации"""
+    """Проверка ответа API сервиса на соответствие документации."""
     if not isinstance(response, dict):
         raise TypeError("Ответ API не является JSON структурой")
     api_keys = {
@@ -100,7 +104,7 @@ def check_response(response):
 
 
 def parse_status(homework):
-    """Извлечение информации о конкретной домашней работе"""
+    """Извлечение информации о конкретной домашней работе."""
     homework_name = homework.get('homework_name')
     if homework_name is None:
         raise KeyError(
@@ -149,14 +153,14 @@ def main():  # noqa: C901
             except TypeError as error:
                 message = f'Сбой в работе программы: {error}'
                 logger.error(message)
-            except requests.RequestException as error:
+            except NotAvailableAPI as error:
                 message = f'Сбой в работе программы: {error}'
                 logger.error(message)
             except Exception as error:
                 message = f'Сбой в работе программы: {error}'
                 logger.error(message)
             finally:
-                time.sleep(RETRY_PERIOD)  # TODO добавить нужный период
+                time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
